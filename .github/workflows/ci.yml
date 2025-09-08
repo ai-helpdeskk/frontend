@@ -1,5 +1,5 @@
 # .github/workflows/ci.yml
-name: CI - Build and Push File Service
+name: CI - Build and Push Frontend
 
 on:
   push:
@@ -14,7 +14,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: samitsinghhh/file-service
+  IMAGE_NAME: samitsinghhh/frontend
 
 jobs:
   test:
@@ -23,69 +23,83 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
       with:
-        python-version: '3.11'
-        
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-        
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y poppler-utils
+        node-version: '18'
+        cache: 'npm'
         
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-asyncio pytest-cov httpx
+        # Handle missing package-lock.json
+        if [ ! -f "package-lock.json" ]; then
+          echo "📦 No package-lock.json found, creating one..."
+          npm install
+        else
+          npm ci
+        fi
         
     - name: Run linting
       run: |
-        pip install flake8
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Install ESLint if not present
+        if ! npm list eslint > /dev/null 2>&1; then
+          npm install --save-dev eslint
+        fi
+        # Run linting (non-blocking)
+        npx eslint src/ --ext .js,.jsx || echo "⚠️ ESLint warnings found"
         
     - name: Run tests
       run: |
-        # Create a simple test if none exist
-        if [ ! -f "test_main.py" ]; then
-          cat > test_main.py << 'EOF'
-import pytest
-from fastapi.testclient import TestClient
-from main import app
+        # Create basic test if none exist
+        if [ ! -f "src/App.test.js" ]; then
+          cat > src/App.test.js << 'EOF'
+import { render, screen } from '@testing-library/react';
+import App from './App';
 
-client = TestClient(app)
+test('renders app header', () => {
+  render(<App />);
+  const headerElement = screen.getByText(/AI Chat/i);
+  expect(headerElement).toBeInTheDocument();
+});
 
-def test_read_root():
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "File Service is running" in response.json()["message"]
-
-def test_health_check():
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
-
-def test_get_files_empty():
-    response = client.get("/files/test_session")
-    assert response.status_code in [200, 500]  # 500 if no DB connection
+test('app component mounts without crashing', () => {
+  render(<App />);
+});
 EOF
         fi
         
-        pytest test_main.py -v --cov=main --cov-report=xml || true
+        # Install testing dependencies if missing
+        npm install --save-dev @testing-library/react @testing-library/jest-dom @testing-library/user-event
+        
+        # Run tests
+        CI=true npm test -- --coverage --watchAll=false --passWithNoTests
         
     - name: Upload coverage reports
       uses: codecov/codecov-action@v3
       with:
-        file: ./coverage.xml
+        directory: ./coverage
       continue-on-error: true
+
+    - name: Build application
+      run: |
+        npm run build
+        
+    - name: Test build output
+      run: |
+        # Verify build was successful
+        if [ ! -d "build" ]; then
+          echo "❌ Build directory not found!"
+          exit 1
+        fi
+        
+        if [ ! -f "build/index.html" ]; then
+          echo "❌ index.html not found in build!"
+          exit 1
+        fi
+        
+        echo "✅ Build completed successfully"
+        echo "📊 Build size:"
+        du -sh build/
 
   build-and-push:
     runs-on: ubuntu-latest
@@ -125,6 +139,8 @@ EOF
         cache-from: type=gha
         cache-to: type=gha,mode=max
         platforms: linux/amd64,linux/arm64
+        build-args: |
+          REACT_APP_API_URL=/api
 
     - name: Wait for image availability
       run: |
@@ -166,9 +182,9 @@ EOF
         # Find the deployment file
         DEPLOYMENT_FILE=""
         POSSIBLE_PATHS=(
-          "k8s/deployments/file-service-deployment.yaml"
-          "deployments/file-service-deployment.yaml"
-          "manifests/file-service-deployment.yaml"
+          "k8s/deployments/frontend-deployment.yaml"
+          "deployments/frontend-deployment.yaml"
+          "manifests/frontend-deployment.yaml"
         )
         
         for path in "${POSSIBLE_PATHS[@]}"; do
@@ -180,15 +196,15 @@ EOF
         done
         
         if [ -z "$DEPLOYMENT_FILE" ]; then
-          echo "❌ ERROR: file-service-deployment.yaml not found!"
-          find . -name "*.yaml" -type f | grep -i file || echo "No file service files found"
+          echo "❌ ERROR: frontend-deployment.yaml not found!"
+          find . -name "*.yaml" -type f | grep -i frontend || echo "No frontend files found"
           exit 1
         fi
         
         # Update image tag
         cp "$DEPLOYMENT_FILE" "${DEPLOYMENT_FILE}.backup"
         NEW_IMAGE="${{ env.IMAGE_NAME }}:${{ github.ref_name }}-${IMAGE_TAG}"
-        sed -i "s|samitsinghhh/file-service:.*|${NEW_IMAGE}|g" "$DEPLOYMENT_FILE"
+        sed -i "s|samitsinghhh/frontend:.*|${NEW_IMAGE}|g" "$DEPLOYMENT_FILE"
         
         echo "=== Updated Image Configuration ==="
         grep -n "image:" "$DEPLOYMENT_FILE"
@@ -199,7 +215,7 @@ EOF
         fi
         
         git add "$DEPLOYMENT_FILE"
-        git commit -m "🚀 Update file-service image to ${{ github.ref_name }}-${IMAGE_TAG}"
+        git commit -m "🚀 Update frontend image to ${{ github.ref_name }}-${IMAGE_TAG}"
         git push origin main
         
         echo "✅ Successfully updated deployment manifest"
@@ -219,14 +235,14 @@ EOF
           -H "Authorization: token ${{ secrets.MANIFEST_REPO_TOKEN }}" \
           -H "Accept: application/vnd.github.v3+json" \
           https://api.github.com/repos/${{ github.repository_owner }}/k8s-manifests/dispatches \
-          -d "{\"event_type\":\"deploy-file-service\",\"client_payload\":{\"environment\":\"$ENV\",\"service\":\"file-service\",\"image_tag\":\"${{ github.ref_name }}-${{ github.sha }}\",\"repository\":\"${{ github.repository }}\"}}"
+          -d "{\"event_type\":\"deploy-frontend\",\"client_payload\":{\"environment\":\"$ENV\",\"service\":\"frontend\",\"image_tag\":\"${{ github.ref_name }}-${{ github.sha }}\",\"repository\":\"${{ github.repository }}\"}}"
         
         echo "✅ Deployment trigger sent successfully"
 
     - name: Job summary
       if: always()
       run: |
-        echo "## 📁 File Service CI/CD Summary" >> $GITHUB_STEP_SUMMARY
+        echo "## 🎨 Frontend CI/CD Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
