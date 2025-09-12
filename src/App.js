@@ -14,7 +14,6 @@ function App() {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    // Generate session ID on component mount
     const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     setSessionId(newSessionId);
     loadConversationHistory(newSessionId);
@@ -68,7 +67,6 @@ function App() {
 
     const userMessage = message || 'Uploaded files for analysis';
     
-    // Add user message to chat
     setMessages(prev => [...prev, {
       type: 'user',
       content: userMessage,
@@ -78,18 +76,15 @@ function App() {
     setLoading(true);
 
     try {
-      // Upload files first if any
       if (files.length > 0) {
         await uploadFiles();
       }
 
-      // Send chat message
       const result = await axios.post('/api/chat', {
         message: message || 'Please analyze the uploaded files and tell me about their content.',
         session_id: sessionId
       });
 
-      // Add assistant response to chat
       setMessages(prev => [...prev, {
         type: 'assistant',
         content: result.data.response,
@@ -125,10 +120,8 @@ function App() {
         },
       });
 
-      // Refresh uploaded files list
       loadUploadedFiles(sessionId);
       
-      // Add upload confirmation to chat
       setMessages(prev => [...prev, {
         type: 'system',
         content: `✅ Successfully uploaded ${files.length} file(s): ${files.map(f => f.name).join(', ')}`,
@@ -150,7 +143,7 @@ function App() {
     const validFiles = fileArray.filter(file => {
       const validTypes = ['.pdf', '.txt', '.docx', '.csv', '.json', '.md'];
       const fileExt = '.' + file.name.split('.').pop().toLowerCase();
-      const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB
+      const isValidSize = file.size <= 10 * 1024 * 1024;
       const isValidType = validTypes.includes(fileExt);
       
       if (!isValidSize) {
@@ -210,7 +203,7 @@ function App() {
     <div className="App">
       <header className="App-header">
         <div className="chat-header">
-          <h1>🤖 AI Chat with File Analysis</h1>
+          <h1>🤖 Bedrock Chat</h1>
           <div className="session-info">
             <span>Session: {sessionId.slice(-8)}</span>
             <button onClick={clearConversation} className="clear-btn">Clear Chat</button>
@@ -251,7 +244,7 @@ function App() {
                 <div className="file-list">
                   {uploadedFiles.map((file, index) => (
                     <span key={index} className="uploaded-file-tag">
-                      {file.original_name} ({(file.file_size / 1024).toFixed(1)}KB)
+                      {file.filename} ({(file.file_size / 1024).toFixed(1)}KB)
                       {file.has_text && <span className="text-indicator">📄</span>}
                     </span>
                   ))}
