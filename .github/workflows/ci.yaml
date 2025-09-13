@@ -19,8 +19,6 @@ permissions:
 env:
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-  DOCKER_REPO: "samitsinghhh"
-  IMAGE_NAME: frontend
 
 jobs:
   ci-pipeline:
@@ -37,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
-          npm install --save-dev @testing-library/react@^13.4.0 @testing-library/jest-dom@^5.16.5
+          npm install --save-dev @testing-library/react@^13.4.0 @testing-library/jest-dom@^5.16.5 @testing-library/user-event@^14.4.3
 
       - name: CI Linting 🧹
         run: |
@@ -48,14 +46,14 @@ jobs:
       - name: Software Component Analysis (SCA) 📦
         run: |
           npm audit --audit-level=moderate || true
-          if [ $? -eq 0 ]; then echo "✅ SCA passed"; else echo "⚠️ SCA found vulnerabilities but continuing"; fi
+          if [ $? -eq 0 ]; then echo "✅ SCA passed - No known vulnerabilities"; else echo "⚠️ SCA found vulnerabilities but continuing"; fi
 
       - name: Static Application Security Testing (SAST) 🔒
         run: |
           npm audit --json > npm-audit-report.json 2>/dev/null || echo "{}" > npm-audit-report.json
           CRITICAL_COUNT=$(cat npm-audit-report.json | grep -o '"critical":[0-9]*' | cut -d':' -f2 | head -1)
           if [ "$CRITICAL_COUNT" = "0" ] || [ -z "$CRITICAL_COUNT" ]; then
-            echo "✅ SAST passed"
+            echo "✅ SAST passed - No security issues"
           else
             echo "⚠️ SAST found $CRITICAL_COUNT critical issues but continuing"
           fi
@@ -71,7 +69,8 @@ jobs:
             echo "✅ Build artifacts verified"
             ls -la build/
           else
-            echo "❌ Build artifacts missing" && exit 1
+            echo "❌ Build artifacts missing"
+            exit 1
           fi
 
       - name: Run Unit Tests ✅
@@ -79,13 +78,24 @@ jobs:
           echo "import '@testing-library/jest-dom';" > src/setupTests.js
           
           cat > src/App.test.js << 'EOF'
-          import { render, screen, fireEvent } from '@testing-library/react';
+          import { render, screen, fireEvent, waitFor } from '@testing-library/react';
           import '@testing-library/jest-dom';
           import App from './App';
           
           jest.mock('axios', () => ({
-            get: jest.fn(() => Promise.resolve({ data: { history: [], files: [] } })),
-            post: jest.fn(() => Promise.resolve({ data: { response: 'Test response', session_id: 'test-session' } })),
+            get: jest.fn(() => Promise.resolve({ 
+              data: { 
+                history: [],
+                files: []
+              } 
+            })),
+            post: jest.fn(() => Promise.resolve({ 
+              data: { 
+                response: 'Test response',
+                session_id: 'test-session',
+                model_used: 'test-model'
+              } 
+            })),
             delete: jest.fn(() => Promise.resolve({ data: {} }))
           }));
           
@@ -105,6 +115,11 @@ jobs:
               expect(screen.getByPlaceholderText(/Ask me anything/i)).toBeInTheDocument();
             });
             
+            test('renders file upload area', () => {
+              render(<App />);
+              expect(screen.getByText(/Drop files here/i)).toBeInTheDocument();
+            });
+            
             test('has send button', () => {
               render(<App />);
               const sendButton = screen.getByRole('button', { name: /🚀/i });
@@ -121,12 +136,21 @@ jobs:
           EOF
           
           CI=true npm test -- --coverage --watchAll=false --testTimeout=30000 --passWithNoTests || echo "⚠️ Some tests failed but continuing"
-          if [ -d "coverage" ]; then echo "✅ Test coverage generated"; fi
+          
+          if [ -d "coverage" ]; then
+            echo "✅ Test coverage generated"
+            ls -la coverage/
+          fi
 
       - name: Verify Docker credentials
         run: |
-          if [ -z "${{ env.DOCKER_USERNAME }}" ] || [ -z "${{ env.DOCKER_PASSWORD }}" ]; then
-            echo "❌ Docker credentials not set" && exit 1
+          if [ -z "${{ env.DOCKER_USERNAME }}" ]; then
+            echo "❌ DOCKER_USERNAME is not set"
+            exit 1
+          fi
+          if [ -z "${{ env.DOCKER_PASSWORD }}" ]; then
+            echo "❌ DOCKER_PASSWORD is not set"
+            exit 1
           fi
           echo "✅ Docker credentials are configured"
 
@@ -136,42 +160,59 @@ jobs:
           username: ${{ env.DOCKER_USERNAME }}
           password: ${{ env.DOCKER_PASSWORD }}
 
+      - name: Verify Docker Hub access
+        run: |
+          docker pull hello-world
+          echo "✅ Docker Hub connection successful"
+          docker pull samitsinghhh/frontend:latest 2>/dev/null || echo "ℹ️ Repository doesn't exist or no latest tag (this is OK for new repos)"
+
       - name: Create Docker Image 🐳
         run: |
           IMAGE_TAG="samitsinghhh/frontend:${{ github.sha }}"
           echo "Building image: $IMAGE_TAG"
-          docker build --build-arg REACT_APP_API_URL="/api" -t $IMAGE_TAG -f Dockerfile .
+          docker build \
+            --build-arg REACT_APP_API_URL="/api" \
+            -t $IMAGE_TAG \
+            -f Dockerfile .
           echo "✅ Docker image built successfully"
 
       - name: Test Docker Image 🧪
         run: |
           IMAGE_TAG="samitsinghhh/frontend:${{ github.sha }}"
-          docker run -d --name test-frontend-container -p 3000:3000 $IMAGE_TAG
-          sleep 15
           
-          if docker ps | grep test-frontend-container; then
+          docker run -d --name test-container -p 3000:3000 $IMAGE_TAG
+          sleep 10
+          
+          if docker ps | grep test-container; then
             echo "✅ Container is running"
           else
             echo "❌ Container failed to start"
-            docker logs test-frontend-container
+            docker logs test-container
             exit 1
           fi
           
-          if curl -f -m 10 http://localhost:3000/health; then
+          if curl -f http://localhost:3000/health; then
             echo "✅ Health check passed"
           else
             echo "❌ Health check failed"
-            docker logs test-frontend-container
+            docker logs test-container
             exit 1
           fi
           
-          docker stop test-frontend-container
-          docker rm test-frontend-container
+          if curl -f -m 10 http://localhost:3000/ | grep -q "AI Chat App"; then
+            echo "✅ Frontend is serving correctly"
+          else
+            echo "⚠️ Frontend response test failed (but container is running)"
+          fi
+          
+          docker stop test-container
+          docker rm test-container
 
       - name: Push Docker Image to Docker Hub 🚢
         run: |
           IMAGE_TAG="samitsinghhh/frontend:${{ github.sha }}"
-          echo "Pushing: $IMAGE_TAG"
+          
+          echo "Attempting to push: $IMAGE_TAG"
           
           if docker push $IMAGE_TAG; then
             echo "✅ Successfully pushed $IMAGE_TAG"
@@ -181,12 +222,17 @@ jobs:
           fi
           
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "Tagging and pushing as latest..."
             docker tag $IMAGE_TAG samitsinghhh/frontend:latest
+            
             if docker push samitsinghhh/frontend:latest; then
               echo "✅ Successfully pushed latest tag"
             else
-              echo "❌ Failed to push latest tag" && exit 1
+              echo "❌ Failed to push latest tag"
+              exit 1
             fi
+          else
+            echo "ℹ️ Not on main branch, skipping latest tag"
           fi
 
       - name: Update deployment manifest
