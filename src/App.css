@@ -333,6 +333,7 @@
   color: rgba(255, 255, 255, 0.6);
 }
 
+/* Responsive design */
 @media (max-width: 768px) {
   .App-header {
     padding: 10px;
