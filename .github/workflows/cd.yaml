@@ -16,55 +16,55 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Verify kubectl access
       run: |
         kubectl cluster-info
         kubectl get nodes
-    
+
     - name: Wait for infrastructure dependencies
       run: |
         echo "⏳ Waiting for infrastructure to be ready..."
-        
+
         timeout 300 bash -c 'until kubectl get namespace bedrock-chat-v2 2>/dev/null; do echo "Waiting for namespace..."; sleep 10; done'
         timeout 300 bash -c 'until kubectl get deployment api-gateway -n bedrock-chat-v2 2>/dev/null; do echo "Waiting for API Gateway..."; sleep 10; done'
         kubectl wait --for=condition=available deployment/api-gateway -n bedrock-chat-v2 --timeout=300s || echo "API Gateway not ready yet, continuing..."
-        
+
         echo "✅ Infrastructure dependencies verified!"
-    
+
     - name: Deploy Frontend
       run: |
         echo "🚀 Deploying Frontend to Kubernetes..."
-        
+
         # Apply all k8s manifests
         kubectl apply -f k8s/ -n bedrock-chat-v2
-        
+
         echo "⏳ Waiting for deployment rollout..."
         kubectl rollout status deployment/frontend -n bedrock-chat-v2 --timeout=300s
-        
+
         echo "✅ Frontend deployed successfully!"
-    
+
     - name: Verify deployment
       run: |
         echo "🔍 Verifying Frontend deployment..."
-        
+
         kubectl get pods -n bedrock-chat-v2 -l app=frontend -o wide
         kubectl get service frontend -n bedrock-chat-v2
-        
+
         # Check if NodePort service exists and get the port
         if kubectl get service frontend-nodeport -n bedrock-chat-v2 2>/dev/null; then
           NODEPORT=$(kubectl get service frontend-nodeport -n bedrock-chat-v2 -o jsonpath='{.spec.ports[0].nodePort}')
           echo "🌐 Frontend accessible via NodePort: $NODEPORT"
         fi
-        
+
         kubectl get ingress -n bedrock-chat-v2 || echo "No ingress configured"
         kubectl logs -n bedrock-chat-v2 -l app=frontend --tail=10
-        
+
         kubectl run test-frontend-$RANDOM --image=curlimages/curl --rm -i --restart=Never -n bedrock-chat-v2 -- \
           curl -f http://frontend.bedrock-chat-v2.svc.cluster.local:3000/health || echo "Health check completed"
-        
+
         echo "✅ Frontend verification completed!"
-    
+
     - name: Deployment summary
       run: |
         echo "🎉 **Frontend Deployment Successful!**"
