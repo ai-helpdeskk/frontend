@@ -26,36 +26,21 @@ jobs:
       run: |
         echo "⏳ Waiting for infrastructure to be ready..."
         
-        timeout 300 bash -c 'until kubectl get namespace bedrock-chat 2>/dev/null; do echo "Waiting for namespace..."; sleep 10; done'
-        timeout 300 bash -c 'until kubectl get deployment api-gateway -n bedrock-chat 2>/dev/null; do echo "Waiting for API Gateway..."; sleep 10; done'
-        kubectl wait --for=condition=available deployment/api-gateway -n bedrock-chat --timeout=300s || echo "API Gateway not ready yet, continuing..."
+        timeout 300 bash -c 'until kubectl get namespace bedrock-chat-v2 2>/dev/null; do echo "Waiting for namespace..."; sleep 10; done'
+        timeout 300 bash -c 'until kubectl get deployment api-gateway -n bedrock-chat-v2 2>/dev/null; do echo "Waiting for API Gateway..."; sleep 10; done'
+        kubectl wait --for=condition=available deployment/api-gateway -n bedrock-chat-v2 --timeout=300s || echo "API Gateway not ready yet, continuing..."
         
         echo "✅ Infrastructure dependencies verified!"
-    
-    - name: Get latest image tag
-      id: get-image
-      run: |
-        IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/bedrock-chat-frontend:latest"
-        echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-        echo "Using image: $IMAGE_TAG"
-    
-    - name: Update deployment manifests
-      run: |
-        cd k8s
-        sed -i "s|image: ghcr.io/.*/bedrock-chat-frontend:.*|image: ${{ steps.get-image.outputs.image-tag }}|g" deployment.yaml
-        
-        echo "Updated deployment.yaml:"
-        grep "image:" deployment.yaml
     
     - name: Deploy Frontend
       run: |
         echo "🚀 Deploying Frontend to Kubernetes..."
         
-        # Apply all k8s manifests (includes both ClusterIP service and NodePort service)
-        kubectl apply -f k8s/ -n bedrock-chat
+        # Apply all k8s manifests
+        kubectl apply -f k8s/ -n bedrock-chat-v2
         
         echo "⏳ Waiting for deployment rollout..."
-        kubectl rollout status deployment/frontend -n bedrock-chat --timeout=300s
+        kubectl rollout status deployment/frontend -n bedrock-chat-v2 --timeout=300s
         
         echo "✅ Frontend deployed successfully!"
     
@@ -63,39 +48,28 @@ jobs:
       run: |
         echo "🔍 Verifying Frontend deployment..."
         
-        kubectl get pods -n bedrock-chat -l app=frontend -o wide
-        kubectl get service frontend -n bedrock-chat
+        kubectl get pods -n bedrock-chat-v2 -l app=frontend -o wide
+        kubectl get service frontend -n bedrock-chat-v2
         
         # Check if NodePort service exists and get the port
-        if kubectl get service frontend-nodeport -n bedrock-chat 2>/dev/null; then
-          NODEPORT=$(kubectl get service frontend-nodeport -n bedrock-chat -o jsonpath='{.spec.ports[0].nodePort}')
+        if kubectl get service frontend-nodeport -n bedrock-chat-v2 2>/dev/null; then
+          NODEPORT=$(kubectl get service frontend-nodeport -n bedrock-chat-v2 -o jsonpath='{.spec.ports[0].nodePort}')
           echo "🌐 Frontend accessible via NodePort: $NODEPORT"
-          echo "🔗 Access URL: http://<your-node-ip>:$NODEPORT"
         fi
         
-        kubectl get ingress -n bedrock-chat || echo "No ingress configured"
-        kubectl logs -n bedrock-chat -l app=frontend --tail=10
+        kubectl get ingress -n bedrock-chat-v2 || echo "No ingress configured"
+        kubectl logs -n bedrock-chat-v2 -l app=frontend --tail=10
         
-        kubectl run test-frontend-$RANDOM --image=curlimages/curl --rm -i --restart=Never -n bedrock-chat -- \
-          curl -f http://frontend.bedrock-chat.svc.cluster.local:3000/health || echo "Health check completed"
+        kubectl run test-frontend-$RANDOM --image=curlimages/curl --rm -i --restart=Never -n bedrock-chat-v2 -- \
+          curl -f http://frontend.bedrock-chat-v2.svc.cluster.local:3000/health || echo "Health check completed"
         
         echo "✅ Frontend verification completed!"
     
     - name: Deployment summary
       run: |
         echo "🎉 **Frontend Deployment Successful!**"
+        echo "🏷️ **Image**: Using static image samitsinghhh/frontend:v3"
         echo ""
         echo "🌐 **Access Methods:**"
-        
-        # Check NodePort
-        if kubectl get service frontend-nodeport -n bedrock-chat 2>/dev/null; then
-          NODEPORT=$(kubectl get service frontend-nodeport -n bedrock-chat -o jsonpath='{.spec.ports[0].nodePort}')
-          NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
-          if [ -z "$NODE_IP" ]; then
-            NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-          fi
-          echo "1. **NodePort Access**: http://$NODE_IP:$NODEPORT"
-        fi
-        
-        echo "2. **Port Forward**: kubectl port-forward svc/frontend 3000:3000 -n bedrock-chat"
-        echo "3. **Cluster IP**: http://frontend.bedrock-chat.svc.cluster.local:3000"
+        echo "1. **Port Forward**: kubectl port-forward svc/frontend 3000:3000 -n bedrock-chat-v2"
+        echo "2. **Cluster IP**: http://frontend.bedrock-chat-v2.svc.cluster.local:3000"
