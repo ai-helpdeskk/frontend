@@ -26,20 +26,20 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
-    
+
     - name: Install dependencies
       run: npm ci
-    
+
     - name: Run ESLint (with warnings allowed)
       run: npx eslint src/ --ext .js,.jsx --max-warnings 50 || echo "ESLint completed with warnings"
-    
+
     - name: Check code formatting with Prettier
       run: npx prettier --check src/ || echo "Prettier check completed"
 
@@ -49,22 +49,22 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
-    
+
     - name: Install dependencies
       run: npm ci
-    
+
     - name: Run npm audit
       run: |
         npm audit --audit-level=high || echo "Audit completed with findings"
         npm audit --json > npm-audit-report.json 2>/dev/null || echo "{}" > npm-audit-report.json
-    
+
     - name: Upload security reports
       uses: actions/upload-artifact@v4
       with:
@@ -78,7 +78,7 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
@@ -93,25 +93,25 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
-    
+
     - name: Install dependencies
       run: npm ci
-    
+
     - name: Install testing dependencies
       run: |
         npm install --save-dev @testing-library/react@^13.4.0 @testing-library/jest-dom@^5.16.5 @testing-library/user-event@^14.4.3
-    
+
     - name: Create setupTests.js
       run: |
         echo "import '@testing-library/jest-dom';" > src/setupTests.js
-    
+
     - name: Create basic test
       run: |
         cat > src/App.test.js << 'EOF'
@@ -152,11 +152,11 @@ jobs:
           expect(elements.length).toBeGreaterThan(0);
         });
         EOF
-    
+
     - name: Run tests
       run: |
         CI=true npm test -- --coverage --watchAll=false --testTimeout=30000 --passWithNoTests || echo "Tests completed"
-    
+
     - name: Build application
       run: npm run build
 
@@ -167,17 +167,17 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-    
+
     - name: Log in to Container Registry
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -188,7 +188,7 @@ jobs:
           type=ref,event=pr
           type=sha,prefix={{branch}}-
           type=raw,value=latest,enable={{is_default_branch}}
-    
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
