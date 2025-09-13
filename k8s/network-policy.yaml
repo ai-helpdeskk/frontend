@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: frontend-netpol
-  namespace: bedrock-chat
+  name: frontend-network-policy
+  namespace: bedrock-chat-v2
 spec:
   podSelector:
     matchLabels:
@@ -16,6 +16,9 @@ spec:
     - namespaceSelector:
         matchLabels:
           name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
   # Allow external traffic
   - from: []
     ports:
