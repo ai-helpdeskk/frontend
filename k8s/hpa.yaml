@@ -1,5 +1,3 @@
-# Frontend Horizontal Pod Autoscaler
-# Scales frontend pods based on CPU utilization
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
